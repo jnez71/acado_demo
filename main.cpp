@@ -1,48 +1,70 @@
 #include <acado_toolkit.hpp>
 #include <acado_gnuplot.hpp>
 
+//////////////////////////////////////////////////
 
-int main( ){
+using Real = double;
+using namespace ACADO;
 
-    USING_NAMESPACE_ACADO
+//////////////////////////////////////////////////
 
+int main(int argc, char** argv) {
 
-    DifferentialState        s,v,m      ;     // the differential states
-    Control                  u          ;     // the control input u
-    Parameter                T          ;     // the time horizon T
-    DifferentialEquation     f( 0.0, T );     // the differential equation
+    DifferentialState x, y, q;
+    Control v, w;
+    Real l = 0.5; // m
 
-//  -------------------------------------
-    OCP ocp( 0.0, T );                        // time horizon of the OCP: [0,T]
-    ocp.minimizeMayerTerm( T );               // the time T should be optimized
+    auto bx = x + l*cos(q);
+    auto by = y + l*sin(q);
 
-    f << dot(s) == v;                         // an implementation
-    f << dot(v) == (u-0.2*v*v)/m;             // of the model equations
-    f << dot(m) == -0.01*u*u;                 // for the rocket.
+    Real rx = -7; // m
+    Real ry = 7; // m
 
-    ocp.subjectTo( f                   );     // minimize T s.t. the model,
-    ocp.subjectTo( AT_START, s ==  0.0 );     // the initial values for s,
-    ocp.subjectTo( AT_START, v ==  0.0 );     // v,
-    ocp.subjectTo( AT_START, m ==  1.0 );     // and m,
+    Real tf = 5; // s
+    Real dt = 0.1; // s
+    Real nt = tf / dt;
 
-    ocp.subjectTo( AT_END  , s == 10.0 );     // the terminal constraints for s
-    ocp.subjectTo( AT_END  , v ==  0.0 );     // and v,
+    DifferentialEquation f(0.0, tf);
+    f << dot(x) == v*cos(q);
+    f << dot(y) == v*sin(q);
+    f << dot(q) == w;
 
-    ocp.subjectTo( -0.1 <= v <=  1.7   );     // as well as the bounds on v
-    ocp.subjectTo( -1.1 <= u <=  1.1   );     // the control input u,
-    ocp.subjectTo(  5.0 <= T <= 15.0   );     // and the time horizon T.
-//  -------------------------------------
+    OCP ocp(0.0, tf, nt);
+    ocp.subjectTo(f);
+
+    ocp.subjectTo(-2.0 <= v <= 2.0); // m/s
+    ocp.subjectTo(-1.5 <= w <= 1.5); // rad/s
+
+    Function ex; ex << rx-bx;
+    Function ey; ey << ry-by;
+    ocp.minimizeLSQ(ex);
+    ocp.minimizeLSQ(ey);
+
+    Real reg = 0.1;
+    Function ev; ev << reg*v;
+    Function ew; ew << reg*w;
+    ocp.minimizeLSQ(ev);
+    ocp.minimizeLSQ(ew);
+
+    ocp.subjectTo(AT_START, x == 0.0); // m
+    ocp.subjectTo(AT_START, y == 0.0); // m
+    ocp.subjectTo(AT_START, q == 0.0); // rad
+
+    OptimizationAlgorithm solver(ocp);
+    solver.set(INTEGRATOR_TYPE, INT_RK23);
+    solver.set(HESSIAN_APPROXIMATION, BLOCK_BFGS_UPDATE);
+    solver.set(DISCRETIZATION_TYPE, MULTIPLE_SHOOTING);
+    solver.set(KKT_TOLERANCE, 1e-1);
 
     GnuplotWindow window;
-        window.addSubplot( s, "THE DISTANCE s"      );
-        window.addSubplot( v, "THE VELOCITY v"      );
-        window.addSubplot( m, "THE MASS m"          );
-        window.addSubplot( u, "THE CONTROL INPUT u" );
+    window.addSubplot(x, "x");
+    window.addSubplot(y, "y");
+    window.addSubplot(q, "q");
+    window.addSubplot(v, "v");
+    window.addSubplot(w, "w");
+    solver << window;
 
-    OptimizationAlgorithm algorithm(ocp);     // the optimization algorithm
-    algorithm << window;
-    algorithm.solve();                        // solves the problem.
-
+    solver.solve();
 
     return 0;
 }
